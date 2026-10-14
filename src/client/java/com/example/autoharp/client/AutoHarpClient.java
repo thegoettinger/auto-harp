@@ -24,7 +24,7 @@ import org.slf4j.LoggerFactory;
 public class AutoHarpClient implements ClientModInitializer {
 
 	private static final Logger LOGGER = LoggerFactory.getLogger("AutoHarp");
-	private static final boolean DEBUG = true;
+	private static final boolean DEBUG = false;
 
 	private static final String TITLE_MARKER = "Harp";
 	private static final int CLICK_BUTTON = 0; // try 2 with ContainerInput.CLONE if PICKUP misbehaves

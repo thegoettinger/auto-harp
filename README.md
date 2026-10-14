@@ -1,9 +1,20 @@
 # Auto Harp
 
-## Setup
+A Fabric mod that automatically plays Melody's Harp in Hypixel SkyBlock.
 
-For setup instructions, please see the [Fabric Documentation page](https://docs.fabricmc.net/develop/getting-started/creating-a-project#setting-up) related to the IDE that you are using.
+## ⚠️ Warning
+This mod automates clicks in a Hypixel GUI. That breaks Hypixel's rules,
+and **using it can get your account banned**. Use at your own risk.
 
-## License
+## Requirements
+- Minecraft 26.1.2
+- Fabric Loader 0.19.3 or newer
+- Fabric API
 
-This template is available under the CC0 license. Feel free to learn from it and incorporate it in your own projects.
+## Installation
+1. Download the latest `auto-harp-x.x.x.jar` from [Releases](../../releases).
+2. Put it in your `mods` folder together with Fabric API.
+3. Open Melody's Harp and start a song. The mod clicks the notes for you.
+
+## Building from source
+Requires JDK 25. Run `./gradlew build`, and the jar is in `build/libs/`.
