@@ -3,7 +3,8 @@
 	"package": "com.example.autoharp.client.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"client": [
-		"ExampleClientMixin"
+		"ExampleClientMixin",
+		"HarpPacketMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

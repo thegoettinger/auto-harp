@@ -1,10 +1,12 @@
 package com.example.autoharp.client;
 
+import com.example.autoharp.HarpNoteTracker;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.ContainerScreen;
+import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
+import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.item.ItemStack;
@@ -12,76 +14,80 @@ import net.minecraft.world.item.Items;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * Auto-solver for Melody's Harp (Minecraft 26.1.2).
- *
- * Watches every slot of the harp GUI and clicks a slot the moment
- * it turns into a QUARTZ_BLOCK (a note that is ready to be hit).
- *
- * DEBUG = true writes what the mod sees to the game log
- * (Modrinth -> Logs tab, search for "AutoHarp").
- */
+/** Plays harp notes once per server-confirmed appearance, using the Q action. */
 public class AutoHarpClient implements ClientModInitializer {
-
 	private static final Logger LOGGER = LoggerFactory.getLogger("AutoHarp");
-	private static final boolean DEBUG = false;
+	private static final int DROP_ONE = 0;
+	private static AutoHarpClient instance;
 
-	private static final String TITLE_MARKER = "Harp";
-	private static final int CLICK_BUTTON = 0; // try 2 with ContainerInput.CLONE if PICKUP misbehaves
-
-	private boolean[] wasQuartz = new boolean[0];
-	private int currentContainerId = -1;
-	private Screen lastScreen = null;
+	private final HarpNoteTracker notes = new HarpNoteTracker();
+	private ChestMenu trackedMenu;
 
 	@Override
 	public void onInitializeClient() {
-		LOGGER.info("AutoHarp loaded");
-		ClientTickEvents.END_CLIENT_TICK.register(this::onTick);
+		instance = this;
+		LOGGER.info("AutoHarp loaded (server-confirmed note tracking)");
+		ClientTickEvents.END_CLIENT_TICK.register(mc -> {
+			ChestMenu menu = activeMenu(mc);
+			if (menu != null) playPending(mc, menu);
+		});
 	}
 
-	private void onTick(Minecraft mc) {
-		if (mc.player == null || mc.gameMode == null) return;
+	/** Called after vanilla has applied a server slot update on the client thread. */
+	public static void onServerSlot(ClientboundContainerSetSlotPacket packet) {
+		if (instance == null) return;
+		Minecraft mc = Minecraft.getInstance();
+		ChestMenu menu = instance.activeMenu(mc);
+		if (menu == null || packet.getContainerId() != menu.containerId) return;
 
-		Screen current = mc.screen;
-		if (DEBUG && current != lastScreen && current != null) {
-			LOGGER.info("Screen opened: {}", current.getClass().getName());
+		ItemStack stack = packet.getItem();
+		instance.notes.observeServerSlot(packet.getSlot(), stack.is(Items.QUARTZ_BLOCK), stack.isEmpty());
+		instance.playPending(mc, menu);
+	}
+
+	/** Full resyncs must use the same latch as individual slot updates. */
+	public static void onServerContent(ClientboundContainerSetContentPacket packet) {
+		if (instance == null) return;
+		Minecraft mc = Minecraft.getInstance();
+		ChestMenu menu = instance.activeMenu(mc);
+		if (menu == null || packet.containerId() != menu.containerId) return;
+
+		for (int slot = HarpNoteTracker.FIRST_SLOT;
+				slot < HarpNoteTracker.FIRST_SLOT + HarpNoteTracker.KEY_COUNT; slot++) {
+			if (slot >= packet.items().size()) break;
+			ItemStack stack = packet.items().get(slot);
+			instance.notes.observeServerSlot(slot, stack.is(Items.QUARTZ_BLOCK), stack.isEmpty());
 		}
-		lastScreen = current;
+		instance.playPending(mc, menu);
+	}
 
-		if (!(current instanceof ContainerScreen screen)) {
-			currentContainerId = -1;
-			return;
+	private ChestMenu activeMenu(Minecraft mc) {
+		ChestMenu menu = null;
+		if (mc.player != null && mc.gameMode != null
+				&& mc.screen instanceof ContainerScreen screen
+				&& screen.getMenu().getRowCount() == 6
+				&& screen.getTitle().getString().replaceAll("§.", "").startsWith("Harp -")
+				&& mc.player.containerMenu == screen.getMenu()) {
+			menu = screen.getMenu();
 		}
-
-		ChestMenu menu = screen.getMenu();
-		String title = screen.getTitle().getString().replaceAll("§.", "");
-		int size = menu.getRowCount() * 9;
-
-		// New window -> reset state and log what it is
-		if (menu.containerId != currentContainerId) {
-			currentContainerId = menu.containerId;
-			wasQuartz = new boolean[size];
-			if (DEBUG) {
-				LOGGER.info("Container '{}' with {} rows (harp: {})",
-						title, menu.getRowCount(), title.contains(TITLE_MARKER));
-			}
+		// Compare menu identity, not just the ID (IDs can be reused after reopening).
+		if (menu != trackedMenu) {
+			notes.reset();
+			trackedMenu = menu;
 		}
+		return menu;
+	}
 
-		if (!title.contains(TITLE_MARKER)) return;
-
-		for (int slot = 0; slot < size; slot++) {
-			ItemStack stack = menu.getContainer().getItem(slot);
-			boolean quartz = stack.is(Items.QUARTZ_BLOCK);
-
-			// Click once when a slot turns into quartz
-			if (quartz && !wasQuartz[slot]) {
+	private void playPending(Minecraft mc, ChestMenu menu) {
+		// Vanilla ignores THROW while carrying an item. Don't consume a note then.
+		if (!menu.getCarried().isEmpty()) return;
+		for (int slot = HarpNoteTracker.FIRST_SLOT;
+				slot < HarpNoteTracker.FIRST_SLOT + HarpNoteTracker.KEY_COUNT; slot++) {
+			if (menu.getContainer().getItem(slot).is(Items.QUARTZ_BLOCK)
+					&& notes.consumePending(slot)) {
 				mc.gameMode.handleContainerInput(
-						menu.containerId, slot, CLICK_BUTTON, ContainerInput.PICKUP, mc.player);
-				if (DEBUG) {
-					LOGGER.info("Clicked slot {} (row {}, col {})", slot, slot / 9, slot % 9);
-				}
+						menu.containerId, slot, DROP_ONE, ContainerInput.THROW, mc.player);
 			}
-			wasQuartz[slot] = quartz;
 		}
 	}
 }
